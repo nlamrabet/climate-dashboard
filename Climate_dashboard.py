@@ -30,7 +30,7 @@ if page == "🌍 Startseite":
            - Analysiere globale Temperaturtrends auf Land- und Ozeanflächen sowie jahreszeitenspezifische Entwicklungen.
 
         2. **Global-/Länder-Analyse**  
-           - Vergleiche Durchschnittstemperaturen weltweit und analysiere Temperaturabweichungen für einzelne Länder oder Regionen.
+           - Vergleiche weltweite Durchschnittstemperaturen, Temparaturanomalien und analysiere Temperaturentwicklungen für einzelne Länder oder Kontinente.
              
         **Wie navigiere ich?**  
           Benutze die **Seitenleiste**, um zwischen den verschiedenen Analyseseiten zu wechseln.
@@ -183,11 +183,13 @@ elif page == "🗺 Global / Länder Analyse":
     st.markdown("""
         **Anleitung für diese Seite:**  
         - **Globale Temperaturverteilung:**  
-          - Wähle ein Jahr mit dem **Slider**, um die weltweiten Durchschnittstemperaturen als Karte zu visualisieren.  
+          - Wähle ein Jahr mit dem **Slider**, um die weltweiten Durchschnittstemperaturen als Karte zu visualisieren.
+          - Wähle die Referenzperiode für die Temperaturanomalie des ausgewählten Jahres 
+        - **Kontinentenvergleich:**  
+          - Wähle Kontinente aus der Dropdown-Liste, um deren Temperaturentwicklung im Zeitverlauf zu vergleichen.  
         - **Ländervergleich:**  
-          - Wähle Länder aus der Dropdown-Liste, um deren Temperaturentwicklung im Zeitverlauf zu vergleichen.  
-        - **Temperaturabweichungen:**  
-          - Nutze den **Slider**, um die Anomalien für ein bestimmtes Jahr zu analysieren.
+          - Wähle Länder aus der Dropdown-Liste, um deren Temperaturentwicklung im Zeitverlauf zu vergleichen.
+          - Wähle ein Land aus der Dropdown-Liste und einen spezifischen Zeitraum um die monatlichen Durchschnittstemperaturen anzeigen zu lassen
     """)
 
     st.markdown("---")
@@ -197,26 +199,34 @@ elif page == "🗺 Global / Länder Analyse":
     def load_country_data():
         df = pd.read_csv("GlobalLandTemperaturesByCountry.csv", parse_dates=["dt"])
         df["year"] = df["dt"].dt.year  # Jahr extrahieren
-        # Durchschnittswerte pro Land und Jahr berechnen
-        aggregated_df = df.groupby(["Country", "year"])["AverageTemperature"].mean().reset_index()
-        return aggregated_df
+        df["month"] = df["dt"].dt.month  # Monat extrahieren
 
-    country_df = load_country_data()
+        # 👉 Datensatz 1: Aggregierte Jahresdurchschnittswerte (für bestehende Darstellungen)
+        country_yearly_df = df.groupby(["Country", "year"])["AverageTemperature"].mean().reset_index()
+
+        # 👉 Datensatz 2: Monatliche Durchschnittswerte (nur für die neue Heatmap)
+        country_monthly_df = df.groupby(["Country", "year", "month"])["AverageTemperature"].mean().reset_index()
+
+        return country_yearly_df, country_monthly_df
+
+    # Daten abrufen
+    country_yearly_df, country_monthly_df = load_country_data()
+
 
     # Entferne Kontinente aus der Länderliste
     continents_to_exclude = [
         "Africa", "Asia", "Europe", "North America", "South America", "Oceania"]
-    country_df = country_df[~country_df["Country"].isin(continents_to_exclude)]
+    country_yearly_df = country_yearly_df[~country_yearly_df["Country"].isin(continents_to_exclude)]
 
     # Interaktive Weltkarte
-    st.markdown("### 🗺 Globale Temperaturverteilung")
+    st.markdown("## 🗺 Globale Temperaturverteilung")
 
     # Slider zur Auswahl eines spezifischen Jahres für die Karte
-    min_year, max_year = int(country_df["year"].min()), int(country_df["year"].max())
+    min_year, max_year = int(country_yearly_df["year"].min()), int(country_yearly_df["year"].max())
     selected_map_year = st.slider("Wähle ein Jahr für die Weltkarte:", min_year, max_year, 2000)
 
     # Daten für das ausgewählte Jahr filtern
-    map_data = country_df[country_df["year"] == selected_map_year]
+    map_data = country_yearly_df[country_yearly_df["year"] == selected_map_year]
 
     # Entferne NaN-Werte aus der Temperaturspalte
     map_data = map_data.dropna(subset=["AverageTemperature"])
@@ -224,11 +234,51 @@ elif page == "🗺 Global / Länder Analyse":
     # Werte auf 2 Nachkommastellen runden
     map_data["AverageTemperature"] = map_data["AverageTemperature"].round(2)
 
-    # Durchschnittstemperatur weltweit berechnen und anzeigen
-    global_avg_temp = map_data["AverageTemperature"].mean()
-    st.markdown(f"### Durchschnittstemperatur weltweit im Jahr {selected_map_year}: **{global_avg_temp:.2f}°C**")
+    # Auswahl der Referenzperiode für Temperaturanomalien
+    reference_choice = st.radio(
+        "Wähle die Referenzperiode für die Temperaturanomalie:",
+        ["1961-1990 (WMO)", "1850-1900 (IPCC)"], horizontal=True
+    )
 
-    # Map Konfiguration
+    # Historischen Mittelwert berechnen
+    if reference_choice == "1961-1990 (WMO)":
+        reference_period = country_yearly_df[(country_yearly_df["year"] >= 1961) & (country_yearly_df["year"] <= 1990)]
+        selected_reference = "1961-1990 (WMO)"
+    elif reference_choice == "1850-1900 (IPCC)":
+        reference_period = country_yearly_df[(country_yearly_df["year"] >= 1850) & (country_yearly_df["year"] <= 1900)]
+        selected_reference = "1850-1900 (IPCC)"
+
+    # Falls keine Daten verfügbar sind, setze Standardwert
+    if reference_period.empty:
+        st.warning("⚠️ Keine Daten für die gewählte Referenzperiode verfügbar!")
+        historical_global_avg_temp = 0
+    else:
+        historical_global_avg_temp = reference_period["AverageTemperature"].mean()
+
+    # Durchschnittstemperatur weltweit berechnen
+    global_avg_temp = map_data["AverageTemperature"].mean()
+
+    # Berechnung der Temperaturanomalie
+    temperature_anomaly = global_avg_temp - historical_global_avg_temp
+
+    # 📌 Layout für KPI-Metriken erstellen (2 Spalten)
+    col1, col2 = st.columns(2)
+
+    # 🌡 Durchschnittstemperatur weltweit als KPI
+    col1.metric(
+        label="🌍 Durchschnittstemperatur weltweit",
+        value=f"{global_avg_temp:.2f}°C",
+        delta=None
+    )
+
+    # 🔥 Temperaturabweichung vom historischen Mittelwert als KPI
+    col2.metric(
+        label=f"🔥 Temperaturabweichung ({selected_reference})",
+        value=f"{temperature_anomaly:.2f}°C",
+        delta=None  
+    )
+
+    # Map Konfiguration (nur Durchschnittstemperaturen!)
     fig_map = px.choropleth(
         map_data,
         locations="Country",
@@ -242,16 +292,16 @@ elif page == "🗺 Global / Länder Analyse":
     )
 
     fig_map.update_layout(
-        height=700,  # Erhöhte Höhe für eine größere Darstellung
-        margin={"r": 0, "t": 50, "l": 0, "b": 0},  # Entferne unnötige Ränder
+        height=700,
+        margin={"r": 0, "t": 50, "l": 0, "b": 0}
     )
 
-    st.plotly_chart(fig_map, use_container_width=True)  # Volle Breite des Dashboards
+    st.plotly_chart(fig_map, use_container_width=True)
 
     st.markdown("---")
 
     # Kontinentenvergleich 
-    st.markdown("### 🌍 Vergleich der Kontinente")
+    st.markdown("## 🌍 Vergleich der Kontinente")
 
     # Mapping von Ländern zu Kontinenten
     # Zuordnung aller Länder zu Kontinenten
@@ -307,10 +357,10 @@ elif page == "🗺 Global / Länder Analyse":
                 return continent
         return "Andere"
 
-    country_df["Continent"] = country_df["Country"].apply(assign_continent)
+    country_yearly_df["Continent"] = country_yearly_df["Country"].apply(assign_continent)
 
     # Durchschnittstemperatur pro Kontinent und Jahr berechnen
-    continent_data = country_df.groupby(["Continent", "year"])["AverageTemperature"].mean().reset_index()
+    continent_data = country_yearly_df.groupby(["Continent", "year"])["AverageTemperature"].mean().reset_index()
 
     # Mehrfachauswahl für Kontinente
     unique_continents = continent_data["Continent"].unique()
@@ -342,10 +392,10 @@ elif page == "🗺 Global / Länder Analyse":
     st.markdown("---")
 
     # Länderspezifische Temperaturentwicklung
-    st.markdown("### 🌍 Länderspezifische Temperaturentwicklung")
+    st.markdown("## 🌍 Länderspezifische Temperaturentwicklung")
 
     # Dropdown für Länderauswahl 
-    unique_countries = country_df["Country"].unique()
+    unique_countries = country_yearly_df["Country"].unique()
     selected_countries = st.multiselect(
         "Wähle Länder zum Vergleich:", unique_countries, ["Germany", "United States"]
     )
@@ -354,9 +404,9 @@ elif page == "🗺 Global / Länder Analyse":
     selected_years = st.slider("Zeitraum wählen:", min_year, max_year, (1900, 2013), key="country_years")
 
     # Daten für ausgewählte Länder filtern
-    filtered_country_df = country_df[
-        (country_df["year"] >= selected_years[0]) & (country_df["year"] <= selected_years[1]) &
-        (country_df["Country"].isin(selected_countries))
+    filtered_country_df = country_yearly_df[
+        (country_yearly_df["year"] >= selected_years[0]) & (country_yearly_df["year"] <= selected_years[1]) &
+        (country_yearly_df["Country"].isin(selected_countries))
     ]
 
     # Zeitreihenplot
@@ -372,51 +422,60 @@ elif page == "🗺 Global / Länder Analyse":
 
     st.plotly_chart(fig_country, use_container_width=True)
 
+
     st.markdown("---")
 
-    # Regionale Jahre definieren
-    min_year_country = int(country_df["year"].min())
-    max_year_country = int(country_df["year"].max())
+    # Länderspezifische Temperatur-Heatmap
+    st.markdown("## 📆 Monatliche Durchschnittstemperaturen für ein Land")
 
-    # Temperaturanomalien
-    st.markdown("### 🔥 Temperaturabweichungen vom historischen Mittelwert")
-
-    country_mean_temps = country_df.groupby("Country")["AverageTemperature"].mean().reset_index()
-    country_mean_temps.rename(columns={"AverageTemperature": "MeanTemp"}, inplace=True)
-
-    country_anomalies = country_df.merge(country_mean_temps, on="Country")
-    country_anomalies["TempAnomaly"] = country_anomalies["AverageTemperature"] - country_anomalies["MeanTemp"]
-
-    selected_anomaly_year = st.slider(
-        "Wähle ein Jahr für die Anomalien-Analyse:",
-        min_year_country,
-        max_year_country,
-        2000,
-        key="anomaly_year"
+    # Drop-down für Länderauswahl
+    selected_country_heatmap = st.selectbox(
+        "Wähle ein Land für die Heatmap:", 
+        country_monthly_df["Country"].unique(), 
+        key="heatmap_country"
     )
 
-    anomaly_data = country_anomalies[country_anomalies["year"] == selected_anomaly_year]
+    # Slider für Zeitraum
+    min_year, max_year = int(country_monthly_df["year"].min()), int(country_monthly_df["year"].max())
+    selected_years_heatmap = st.slider(
+        "Wähle den Zeitraum für die Heatmap:", 
+        min_year, max_year, (2000, 2013),
+        key="heatmap_years"
+    )
 
-    fig_anomaly = px.choropleth(
-        anomaly_data,
-        locations="Country",
-        locationmode="country names",
-        color="TempAnomaly",
-        hover_name="Country",
-        color_continuous_scale="thermal",
-        title=f"🌡 Temperaturabweichungen vom Mittelwert ({selected_anomaly_year})",
-        labels={"TempAnomaly": "Abweichung (°C)"},
+    # Daten für das ausgewählte Land und den Zeitraum filtern
+    country_heatmap_data = country_monthly_df[
+        (country_monthly_df["Country"] == selected_country_heatmap) & 
+        (country_monthly_df["year"] >= selected_years_heatmap[0]) & 
+        (country_monthly_df["year"] <= selected_years_heatmap[1])
+    ]
+
+    # Heatmap-Daten umstrukturieren (Jahr als Zeile, Monat als Spalte)
+    heatmap_matrix = country_heatmap_data.pivot(index="year", columns="month", values="AverageTemperature")
+
+    # Erstelle die Heatmap mit Plotly
+    fig_heatmap_country = px.imshow(
+        heatmap_matrix,
+        labels={"x": "Monat", "y": "Jahr", "color": "Temperatur (°C)"},
+        title=f"🌡 Monatliche Durchschnittstemperaturen in {selected_country_heatmap}",
+        color_continuous_scale=[
+            [0.00, "darkblue"],   
+            [0.10, "blue"],       
+            [0.20, "cyan"],       
+            [0.30, "lightgreen"], 
+            [0.40, "green"],      
+            [0.50, "yellow"],     
+            [0.60, "orange"],     
+            [0.70, "darkorange"], 
+            [0.80, "red"],        
+            [0.90, "darkred"],    
+            [1.00, "#8B0000"],    
+        ],
         template="plotly_dark",
+        aspect="auto",
     )
 
-    # Größe der Karte anpassen 
-    fig_anomaly.update_layout(
-        height=700,  
-        margin={"r": 0, "t": 50, "l": 0, "b": 0},  
-    )
-
-
-    st.plotly_chart(fig_anomaly, use_container_width=True)
+    st.plotly_chart(fig_heatmap_country, use_container_width=True)
 
 
 
