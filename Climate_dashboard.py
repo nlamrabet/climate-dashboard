@@ -224,6 +224,10 @@ elif page == "🗺 Global / Länder Analyse":
     # Werte auf 2 Nachkommastellen runden
     map_data["AverageTemperature"] = map_data["AverageTemperature"].round(2)
 
+    # 🌍 Durchschnittstemperatur weltweit berechnen und anzeigen
+    global_avg_temp = map_data["AverageTemperature"].mean()
+    st.markdown(f"### Durchschnittstemperatur weltweit im Jahr {selected_map_year}: **{global_avg_temp:.2f}°C**")
+
     # Map Konfiguration
     fig_map = px.choropleth(
         map_data,
